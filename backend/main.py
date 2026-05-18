@@ -1,30 +1,53 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, Field
+
 import joblib
 import numpy as np
-from datetime import datetime
+
 
 app = FastAPI(
     title="Car Health Prediction API",
-    description="Advanced predictive maintenance API for vehicle health monitoring",
-    version="2.0.0"
+    description="Multi-output car/machine failure prediction using ML",
+    version="2.0"
 )
 
-# Configure CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+TARGET_NAMES = [
+    "Machine failure",
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+]
+
+FEATURE_NAMES = [
+    "Air temperature [K]",
+    "Process temperature [K]",
+    "Rotational speed [rpm]",
+    "Torque [Nm]",
+    "Tool wear [min]",
+    "Type_L",
+    "Type_M"
+]
+
+FAILURE_ADVICE = {
+    "TWF": "Tool Wear Failure risk detected. Inspect or replace the worn tool.",
+    "HDF": "Heat Dissipation Failure risk detected. Check cooling system and temperature levels.",
+    "PWF": "Power Failure risk detected. Check torque, RPM, and power load.",
+    "OSF": "Overstrain Failure risk detected. Reduce load and inspect mechanical stress.",
+    "RNF": "Random Failure risk detected. Perform manual inspection."
+}
+
 
 try:
     model = joblib.load("../saved_models/model.pkl")
@@ -34,180 +57,48 @@ except Exception as e:
 
 
 class CarInput(BaseModel):
-    air_temperature: float = Field(
-        ...,
-        gt=250,
-        lt=400,
-        description="Air temperature in Kelvin (250-400K)"
-    )
-    process_temperature: float = Field(
-        ...,
-        gt=250,
-        lt=450,
-        description="Process temperature in Kelvin (250-450K)"
-    )
-    rotational_speed: float = Field(
-        ...,
-        gt=0,
-        lt=3000,
-        description="Rotational speed in rpm (0-3000)"
-    )
-    torque: float = Field(
-        ...,
-        gt=0,
-        lt=100,
-        description="Torque in Nm (0-100)"
-    )
-    tool_wear: float = Field(
-        ...,
-        ge=0,
-        lt=300,
-        description="Tool wear in minutes (0-300)"
-    )
-    type_L: int = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Machine type L indicator (0 or 1)"
-    )
-    type_M: int = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Machine type M indicator (0 or 1)"
-    )
-
-    @validator('type_L', 'type_M')
-    def validate_type_indicators(cls, v, values):
-        """Ensure only one type indicator is set at a time"""
-        if 'type_L' in values and 'type_M' in values:
-            if values['type_L'] == 1 and v == 1:
-                raise ValueError("Only one machine type indicator can be 1 at a time")
-        return v
-
-    @validator('process_temperature')
-    def validate_temperature_difference(cls, v, values):
-        """Ensure process temperature is higher than air temperature"""
-        if 'air_temperature' in values:
-            if v <= values['air_temperature']:
-                raise ValueError("Process temperature must be higher than air temperature")
-        return v
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "air_temperature": 298.5,
-                "process_temperature": 308.5,
-                "rotational_speed": 1500,
-                "torque": 40,
-                "tool_wear": 15,
-                "type_L": 1,
-                "type_M": 0
-            }
-        }
-
-
-def calculate_risk_level(probability: float) -> str:
-    """Calculate risk level based on failure probability"""
-    if probability < 0.3:
-        return "Low"
-    elif probability < 0.7:
-        return "Medium"
-    else:
-        return "High"
-
-
-def get_maintenance_advice(
-    status: str,
-    risk_level: str,
-    failure_types: List[str],
-    input_data: dict
-) -> str:
-    """Generate detailed maintenance advice based on prediction results"""
-    if status == "Healthy":
-        if risk_level == "Low":
-            return "Machine is healthy. Continue normal operation with routine monitoring."
-        elif risk_level == "Medium":
-            return "Machine is healthy but showing early warning signs. Increase monitoring frequency and schedule preventive maintenance within 2 weeks."
-        else:
-            return "Machine is healthy but at high risk. Immediate inspection recommended. Consider scheduling maintenance within 48 hours."
-    else:
-        # Machine is faulty
-        advice_parts = []
-        
-        if failure_types:
-            failure_descriptions = {
-                "TWF": "Tool Wear Failure - tool has worn beyond acceptable limits",
-                "HDF": "Heat Dissipation Failure - cooling system malfunction detected",
-                "PWF": "Power Failure - power supply or electrical issue detected",
-                "OSF": "Overstrain Failure - machine operating beyond design specifications",
-                "RNF": "Random Failure - unexpected malfunction detected"
-            }
-            
-            for ft in failure_types:
-                advice_parts.append(failure_descriptions.get(ft, f"{ft} detected"))
-        
-        # Add specific advice based on sensor readings
-        if input_data['torque'] > 60:
-            advice_parts.append("High torque detected - check for mechanical resistance")
-        if input_data['rotational_speed'] > 2500:
-            advice_parts.append("High rotational speed - verify load specifications")
-        if input_data['tool_wear'] > 200:
-            advice_parts.append("Tool wear approaching critical levels - replacement needed")
-        if input_data['process_temperature'] - input_data['air_temperature'] > 20:
-            advice_parts.append("Excessive temperature difference - check cooling system")
-        
-        # Priority recommendation
-        if risk_level == "High":
-            advice_parts.insert(0, "CRITICAL: Immediate shutdown and maintenance required!")
-        elif risk_level == "Medium":
-            advice_parts.insert(0, "URGENT: Maintenance required within 24 hours")
-        else:
-            advice_parts.insert(0, "Maintenance required within 1 week")
-        
-        return " | ".join(advice_parts)
+    air_temperature: float = Field(..., gt=250, lt=400)
+    process_temperature: float = Field(..., gt=250, lt=450)
+    rotational_speed: float = Field(..., gt=0)
+    torque: float = Field(..., gt=0)
+    tool_wear: float = Field(..., ge=0)
+    type_L: int = Field(..., ge=0, le=1)
+    type_M: int = Field(..., ge=0, le=1)
 
 
 @app.get("/")
 def home():
     return {
         "message": "Car Health Prediction API is running",
-        "version": "2.0.0",
-        "endpoints": {
-            "/": "API information",
-            "/predict": "POST endpoint for predictions",
-            "/health": "Health check endpoint"
-        }
+        "version": "2.0"
     }
 
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint"""
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
+        "api_status": "running",
         "model_loaded": model is not None,
         "scaler_loaded": scaler is not None
     }
 
 
+@app.get("/model-info")
+def model_info():
+    return {
+        "model": "MultiOutput Balanced Random Forest",
+        "targets": TARGET_NAMES,
+        "features": FEATURE_NAMES,
+        "output": {
+            "0": "No failure",
+            "1": "Failure detected"
+        }
+    }
+
+
 @app.post("/predict")
 def predict(data: CarInput):
-    """
-    Predict machine health status with probability and risk assessment
-    
-    Returns:
-        - status: Healthy or Faulty
-        - prediction: Detailed prediction for each failure type
-        - probability: Failure probability (0-1)
-        - risk_level: Low, Medium, or High
-        - failure_types_detected: List of detected failure types
-        - maintenance_advice: Detailed maintenance recommendations
-        - timestamp: Prediction timestamp
-    """
     try:
-        # Prepare input data
         input_data = np.array([[
             data.air_temperature,
             data.process_temperature,
@@ -218,73 +109,72 @@ def predict(data: CarInput):
             data.type_M
         ]])
 
-        # Scale the input data
         scaled_data = scaler.transform(input_data)
 
-        # Get prediction
         prediction = model.predict(scaled_data)[0]
+        prediction_result = dict(zip(TARGET_NAMES, prediction.astype(int).tolist()))
 
-        # Get probability if model supports it
-        try:
-            probability = model.predict_proba(scaled_data)[0][1]  # Probability of failure
-        except AttributeError:
-            # If model doesn't have predict_proba, estimate based on prediction
-            probability = 0.9 if prediction[0] == 1 else 0.1
+        probabilities = {}
 
-        # Map predictions to target names
-        target_names = ["Machine failure", "TWF", "HDF", "PWF", "OSF", "RNF"]
-        result = dict(zip(target_names, prediction.astype(int).tolist()))
+        for target_name, estimator in zip(TARGET_NAMES, model.estimators_):
+            try:
+                prob = estimator.predict_proba(scaled_data)[0][1]
+                probabilities[target_name] = round(float(prob) * 100, 2)
+            except Exception:
+                probabilities[target_name] = None
 
-        # Determine status
-        if result["Machine failure"] == 1:
-            status = "Faulty"
+        machine_failure_probability = probabilities["Machine failure"]
+
+        if machine_failure_probability >= 70:
+            risk_level = "High"
+        elif machine_failure_probability >= 40:
+            risk_level = "Medium"
         else:
-            status = "Healthy"
+            risk_level = "Low"
 
-        # Calculate risk level
-        risk_level = calculate_risk_level(probability)
+        if prediction_result["Machine failure"] == 1:
+            overall_status = "FAULT DETECTED"
+        else:
+            overall_status = "HEALTHY"
 
-        # Identify failure types
-        failure_types = [
-            name for name in ["TWF", "HDF", "PWF", "OSF", "RNF"]
-            if result[name] == 1
+        detected_failure_types = [
+            failure_type
+            for failure_type in ["TWF", "HDF", "PWF", "OSF", "RNF"]
+            if prediction_result[failure_type] == 1
         ]
 
-        # Generate maintenance advice
-        input_dict = {
-            'air_temperature': data.air_temperature,
-            'process_temperature': data.process_temperature,
-            'rotational_speed': data.rotational_speed,
-            'torque': data.torque,
-            'tool_wear': data.tool_wear
-        }
-        advice = get_maintenance_advice(status, risk_level, failure_types, input_dict)
+        if detected_failure_types:
+            advice_list = [
+                FAILURE_ADVICE[failure_type]
+                for failure_type in detected_failure_types
+            ]
+        else:
+            advice_list = [
+                "Machine is currently healthy. Continue regular monitoring."
+            ]
 
         return {
-            "status": status,
-            "prediction": result,
-            "probability": round(probability, 4),
-            "probability_percentage": f"{round(probability * 100, 2)}%",
+            "overall_status": overall_status,
             "risk_level": risk_level,
-            "failure_types_detected": failure_types,
-            "maintenance_advice": advice,
-            "timestamp": datetime.now().isoformat(),
-            "input_data": {
-                "air_temperature": data.air_temperature,
-                "process_temperature": data.process_temperature,
-                "rotational_speed": data.rotational_speed,
-                "torque": data.torque,
-                "tool_wear": data.tool_wear,
-                "machine_type": "L" if data.type_L == 1 else "M" if data.type_M == 1 else "H"
-            }
+            "predictions": prediction_result,
+            "probabilities": probabilities,
+            "detected_failure_types": detected_failure_types,
+            "maintenance_advice": advice_list
         }
 
-    except ValueError as ve:
-        raise HTTPException(status_code=422, detail=f"Validation error: {str(ve)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction error: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True
+    )
