@@ -77,7 +77,7 @@ def home():
 @app.get("/health")
 def health_check():
     return {
-        "api_status": "running",
+        "api_status": "healthy",
         "model_loaded": model is not None,
         "scaler_loaded": scaler is not None
     }
